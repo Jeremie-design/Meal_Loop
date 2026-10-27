@@ -1,0 +1,84 @@
+#!/bin/bash
+
+set -e
+
+cd "$(dirname "$0")"
+
+echo "Updating MealLoop data..."
+echo
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Python 3 is required, but this computer could not find python3."
+  echo "Install Python 3, then run this file again."
+  echo
+  read -r -p "Press Enter to close this window."
+  exit 1
+fi
+
+if [ ! -d ".venv" ]; then
+  echo "Creating a local Python environment..."
+  python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+
+READY_FILE=".venv/.mealloop_ready"
+if [ ! -f "$READY_FILE" ] || [ requirements.txt -nt "$READY_FILE" ] || [ pyproject.toml -nt "$READY_FILE" ]; then
+  echo "Installing MealLoop requirements..."
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
+  python -m pip install -e .
+  touch "$READY_FILE"
+fi
+
+env_has_placeholders() {
+  grep -Eq 'YOUR_WEB_APP_URL|YOUR_SECRET_TOKEN|YYYY-MM-DD' "$1"
+}
+
+choose_env_file() {
+  if [ -f ".env" ] && ! env_has_placeholders ".env"; then
+    echo ".env"
+    return
+  fi
+  if [ -f "../.env" ] && ! env_has_placeholders "../.env"; then
+    echo "../.env"
+    return
+  fi
+  if [ -f ".env" ]; then
+    echo ".env"
+    return
+  fi
+  echo ""
+}
+
+ENV_FILE="$(choose_env_file)"
+if [ -z "$ENV_FILE" ]; then
+  echo "Missing .env."
+  echo "Copy .env.example to .env and fill in the private API values before refreshing live data."
+  echo
+  echo "Command:"
+  echo "  cp .env.example .env"
+  echo
+  read -r -p "Press Enter to close this window."
+  exit 1
+fi
+
+if env_has_placeholders "$ENV_FILE"; then
+  echo "The .env file still has placeholder values."
+  echo "Replace YOUR_WEB_APP_URL, YOUR_SECRET_TOKEN, and YYYY-MM-DD with real values."
+  echo
+  read -r -p "Press Enter to close this window."
+  exit 1
+fi
+
+ENV_FILE_ABS="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+export MEALLOOP_ENV_FILE="$ENV_FILE_ABS"
+
+python -m mealloop.fetch_responses
+python -m mealloop.nutrislice_fetch
+python -m mealloop.match_meals
+
+echo
+echo "MealLoop data is up to date."
+echo
+read -r -p "Press Enter to close this window."
